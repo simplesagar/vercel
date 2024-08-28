@@ -1,5 +1,11 @@
 # vercel
 
+## 37.3.0
+
+### Minor Changes
+
+- Support custom environments in `vc env rm` ([#12009](https://github.com/vercel/vercel/pull/12009))
+
 ## 37.2.1
 
 ### Patch Changes
