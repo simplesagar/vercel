@@ -2,6 +2,8 @@
 const path = require('path');
 const { deployAndTest } = require('../../utils');
 const fetch = require('../../../../../test/lib/deployment/fetch-retry');
+const cheerio = require('cheerio');
+const { expect } = require('vitest');
 
 const pages = [
   { pathname: '/', dynamic: true },
@@ -205,5 +207,160 @@ describe(`${__dirname.split(path.sep).pop()}`, () => {
         expect(res.status).toEqual(404);
       }
     );
+  });
+
+  describe('fallback should be used correctly', () => {
+    const assertRouteShell = $ => {
+      expect($('[data-loading]').length).toEqual(1);
+      expect($('[data-page]').closest('[hidden]').length).toEqual(0);
+    };
+
+    const assertFallbackShell = $ => {
+      expect($('[data-loading]').length).toEqual(1);
+      expect($('[data-page]').closest('[hidden]').length).toEqual(1);
+    };
+
+    const assertDynamicPostponed = $ => {
+      expect($('[data-agent]').closest('[hidden]').length).toEqual(1);
+    };
+
+    it('should use the fallback shell on the first request', async () => {
+      const res = await fetch(`${ctx.deploymentUrl}/fallback/first`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      const html = await res.text();
+      const $ = cheerio.load(html);
+      expect($('[data-loading]').length).toEqual(1);
+      expect($('[data-page]').closest('[hidden]').length).toEqual(1);
+    });
+
+    it('should use the route shell on the second request', async () => {
+      let res = await fetch(`${ctx.deploymentUrl}/fallback/second`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      let html = await res.text();
+      let $ = cheerio.load(html);
+      assertFallbackShell($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/second`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('HIT');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+    });
+
+    it('should handle dynamic resumes on the fallback pages', async () => {
+      const res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/first`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      let html = await res.text();
+      let $ = cheerio.load(html);
+      assertFallbackShell($);
+      assertDynamicPostponed($);
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+      assertDynamicPostponed($);
+    });
+
+    it('should serve the fallback shell for new pages', async () => {
+      let res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/second`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      let html = await res.text();
+      let $ = cheerio.load(html);
+      assertFallbackShell($);
+      assertDynamicPostponed($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/second`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('HIT');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+      assertDynamicPostponed($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/third`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertFallbackShell($);
+      assertDynamicPostponed($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/third`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('HIT');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+      assertDynamicPostponed($);
+    });
+
+    it('should revalidate the pages and perform a blocking render when the fallback is revalidated', async () => {
+      let res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/fourth`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      let html = await res.text();
+      let $ = cheerio.load(html);
+      assertFallbackShell($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/fourth`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('HIT');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+
+      // Send the revalidation request.
+      res = await fetch(
+        `${ctx.deploymentUrl}/api/revalidate/fallback/dynamic/fourth`,
+        {
+          method: 'DELETE',
+        }
+      );
+      expect(res.status).toEqual(200);
+
+      // Wait for the revalidation to be applied.
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/fourth`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('REVALIDATED');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/fifth`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('PRERENDER');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertFallbackShell($);
+      assertDynamicPostponed($);
+
+      res = await fetch(`${ctx.deploymentUrl}/fallback/dynamic/fifth`);
+      expect(res.status).toEqual(200);
+      expect(res.headers.get('x-vercel-cache')).toEqual('HIT');
+
+      html = await res.text();
+      $ = cheerio.load(html);
+      assertRouteShell($);
+      assertDynamicPostponed($);
+    });
   });
 });
