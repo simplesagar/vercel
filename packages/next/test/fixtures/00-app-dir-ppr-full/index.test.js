@@ -3,7 +3,6 @@ const path = require('path');
 const { deployAndTest } = require('../../utils');
 const fetch = require('../../../../../test/lib/deployment/fetch-retry');
 const cheerio = require('cheerio');
-const { expect } = require('vitest');
 
 const pages = [
   { pathname: '/', dynamic: true },
